@@ -677,7 +677,7 @@ h3 { font-size: 16px; letter-spacing: -0.25px; margin-bottom: 7px; }
   backdrop-filter: blur(6px);
 }
 
-.modalback.opened { display: flex; }
+.modalback.open { display: flex; }
 
 .modal {
   width: min(470px, 100%);

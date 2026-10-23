@@ -28,13 +28,13 @@ function filterAndSort() {
       state.date === 'all' ||
       (state.date === 'week' && diff < WEEK_MS) ||
       (state.date === 'later' && diff >= WEEK_MS);
-    const matchesVenue = state.venue === 'all' || (e.venue) === state.venue;
+    const matchesVenue = state.venue === 'all' || shortVenue(e.venue) === state.venue;
 
     return matchesSearch && matchesCategory && matchesDate && matchesVenue;
   });
 
   if (state.sort === 'soonest') {
-    list.sort(function (a, b) { return b.date.localeCompare(a.date); });
+    list.sort(function (a, b) { return a.date.localeCompare(b.date); });
   } else if (state.sort === 'seats') {
     list.sort(function (a, b) { return a.seatsLeft - b.seatsLeft; });
   }

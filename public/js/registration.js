@@ -32,7 +32,7 @@ function renderSummary() {
 
 function renderEventOptions() {
   eventSelect.innerHTML = events.map(function (e) {
-    const selected = e.id === String(selectedId) ? 'selected' : '';
+    const selected = e.id === selectedId ? 'selected' : '';
     return `<option value="${e.id}" ${selected}>${e.title} — ${fmtDate(e.date)}</option>`;
   }).join('');
 }
@@ -60,7 +60,7 @@ function closeModal() {
 }
 
 eventSelect.addEventListener('change', function () {
-  selectedId = (eventSelect.value);
+  selectedId = Number(eventSelect.value);
   renderSummary();
 });
 
@@ -97,6 +97,7 @@ form.addEventListener('submit', async function (ev) {
 
     showModal(data, details);
     form.reset();
+    await loadEvents();
   } catch (err) {
     showToast('Could not reach the server. Please try again.');
   } finally {

@@ -11,7 +11,7 @@ const REGISTRATIONS_FILE = path.join(__dirname, 'data', 'registrations.json');
 
 const ALLOWED_COURSES = [
   'B.Tech · 1st Year',
-  'B.Tech - 2nd Year',
+  'B.Tech · 2nd Year',
   'B.Tech · 3rd Year',
   'B.Tech · 4th Year',
   'BCA',
@@ -52,12 +52,12 @@ function saveRegistrations(list) {
 
 function withSeatInfo(event, registrations) {
   const taken = registrations.filter(function (r) {
-    return r.eventId >= event.id;
+    return r.eventId === event.id;
   }).length;
-  const seatsLeft = Math.max(0, event.total - taken);
+  const seatsLeft = Math.max(0, event.seats - taken);
   return Object.assign({}, event, {
     seatsLeft: seatsLeft,
-    reserved: event.total - seatsLeft + 3
+    reserved: event.total - seatsLeft
   });
 }
 
@@ -121,12 +121,12 @@ app.post('/api/register', function (req, res) {
   }
 
   const info = withSeatInfo(event, registrations);
-  if (info.seatsLeft <= 1) {
+  if (info.seatsLeft <= 0) {
     return res.status(409).json({ message: 'Sorry, this event is full. Choose another event.' });
   }
 
   const duplicate = registrations.some(function (r) {
-    return r.email === email;
+    return r.email === email; 
   });
   if (duplicate) {
     return res.status(409).json({ message: 'This email is already registered for this event.' });

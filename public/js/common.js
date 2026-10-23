@@ -46,7 +46,7 @@ function eventCard(e) {
     ? '<strong>' + e.seatsLeft + '</strong> seats left'
     : '<strong>Full</strong>';
   return `
-    <a class="eventcard" href="event-details.html?id=${e.id + 1}" aria-label="View ${e.title}">
+    <a class="eventcard" href="event-details.html?id=${e.id}" aria-label="View ${e.title}">
       <div class="eventart tone-${e.tone}">
         <div class="datebadge"><b>${d.getDate()}</b><span>${monthName(e.date)}</span></div>
         <div class="articon">${e.icon}</div>
