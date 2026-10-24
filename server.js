@@ -5,6 +5,7 @@ const path = require('path');
 const app = express();
 const PORT = process.env.PORT || 3000;
 const IS_VERCEL = Boolean(process.env.VERCEL);
+const MONGODB_URI = process.env.MONGODB_URI || '';
 
 const EVENTS_FILE = path.join(__dirname, 'data', 'events.json');
 const REGISTRATIONS_FILE = path.join(__dirname, 'data', 'registrations.json');
@@ -20,6 +21,7 @@ const ALLOWED_COURSES = [
 ];
 
 let memoryRegistrations = null;
+let collectionPromise = null;
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
@@ -32,7 +34,36 @@ function writeJson(file, data) {
   fs.writeFileSync(file, JSON.stringify(data, null, 2));
 }
 
-function loadRegistrations() {
+function route(handler) {
+  return function (req, res, next) {
+    Promise.resolve(handler(req, res)).catch(next);
+  };
+}
+
+function getCollection() {
+  if (!collectionPromise) {
+    const { MongoClient } = require('mongodb');
+    collectionPromise = new MongoClient(MONGODB_URI, { serverSelectionTimeoutMS: 10000 })
+      .connect()
+      .then(async function (client) {
+        const collection = client.db('eventease').collection('registrations');
+        await collection.createIndex({ eventId: 1, email: 1 }, { unique: true });
+        await collection.createIndex({ registrationId: 1 }, { unique: true });
+        return collection;
+      });
+    collectionPromise.catch(function (err) {
+      console.error('MongoDB connection failed:', err.message);
+      collectionPromise = null;
+    });
+  }
+  return collectionPromise;
+}
+
+async function loadRegistrations() {
+  if (MONGODB_URI) {
+    const collection = await getCollection();
+    return collection.find({}, { projection: { _id: 0 } }).toArray();
+  }
   if (IS_VERCEL) {
     if (memoryRegistrations === null) {
       memoryRegistrations = readJson(REGISTRATIONS_FILE);
@@ -42,12 +73,18 @@ function loadRegistrations() {
   return readJson(REGISTRATIONS_FILE);
 }
 
-function saveRegistrations(list) {
-  if (IS_VERCEL) {
-    memoryRegistrations = list;
+async function saveRegistration(registration, existing) {
+  if (MONGODB_URI) {
+    const collection = await getCollection();
+    await collection.insertOne(Object.assign({}, registration));
     return;
   }
-  writeJson(REGISTRATIONS_FILE, list);
+  const updated = existing.concat([registration]);
+  if (IS_VERCEL) {
+    memoryRegistrations = updated;
+    return;
+  }
+  writeJson(REGISTRATIONS_FILE, updated);
 }
 
 function withSeatInfo(event, registrations) {
@@ -74,24 +111,24 @@ function generateRegistrationId(existing) {
   return id;
 }
 
-app.get('/api/events', function (req, res) {
+app.get('/api/events', route(async function (req, res) {
   const events = readJson(EVENTS_FILE);
-  const registrations = loadRegistrations();
+  const registrations = await loadRegistrations();
   res.json(events.map(function (e) { return withSeatInfo(e, registrations); }));
-});
+}));
 
-app.get('/api/events/:id', function (req, res) {
+app.get('/api/events/:id', route(async function (req, res) {
   const id = Number(req.params.id);
   const events = readJson(EVENTS_FILE);
-  const registrations = loadRegistrations();
+  const registrations = await loadRegistrations();
   const event = events.find(function (e) { return e.id === id; });
   if (!event) {
     return res.status(404).json({ message: 'Event not found.' });
   }
   res.json(withSeatInfo(event, registrations));
-});
+}));
 
-app.post('/api/register', function (req, res) {
+app.post('/api/register', route(async function (req, res) {
   const body = req.body || {};
   const fullName = String(body.fullName || '').trim();
   const email = String(body.email || '').trim().toLowerCase();
@@ -99,21 +136,21 @@ app.post('/api/register', function (req, res) {
   const roll = String(body.roll || '').trim();
   const eventId = Number(body.eventId);
 
-  if (fullName.length < 2) {
-    return res.status(400).json({ message: 'Please enter your full name.' });
+  if (!/^[A-Za-z][A-Za-z .'\-]{1,59}$/.test(fullName)) {
+    return res.status(400).json({ message: 'Name can only have letters, spaces, dots, apostrophes and hyphens (2 to 60 characters).' });
   }
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+  if (email.length > 100 || !/^[A-Za-z0-9._\-]+@[A-Za-z0-9\-]+(\.[A-Za-z0-9\-]+)*\.[A-Za-z]{2,}$/.test(email)) {
     return res.status(400).json({ message: 'Please enter a valid email address.' });
   }
   if (ALLOWED_COURSES.indexOf(course) === -1) {
     return res.status(400).json({ message: 'Please select your course and year.' });
   }
-  if (roll.length < 2) {
-    return res.status(400).json({ message: 'Please enter your roll number.' });
+  if (!/^[0-9]{5,15}$/.test(roll)) {
+    return res.status(400).json({ message: 'Roll number must have digits only (5 to 15 digits).' });
   }
 
   const events = readJson(EVENTS_FILE);
-  const registrations = loadRegistrations();
+  const registrations = await loadRegistrations();
   const event = events.find(function (e) { return e.id === eventId; });
 
   if (!event) {
@@ -126,7 +163,7 @@ app.post('/api/register', function (req, res) {
   }
 
   const duplicate = registrations.some(function (r) {
-    return r.email === email; 
+    return r.eventId === eventId && r.email === email;
   });
   if (duplicate) {
     return res.status(409).json({ message: 'This email is already registered for this event.' });
@@ -142,9 +179,9 @@ app.post('/api/register', function (req, res) {
     registeredAt: new Date().toISOString()
   };
 
-  const updatedList = registrations.concat([registration]);
-  saveRegistrations(updatedList);
+  await saveRegistration(registration, registrations);
 
+  const updatedList = registrations.concat([registration]);
   const updated = withSeatInfo(event, updatedList);
   res.status(201).json({
     message: 'Registration successful.',
@@ -152,13 +189,17 @@ app.post('/api/register', function (req, res) {
     registration: registration,
     event: updated
   });
-});
+}));
 
 app.use('/api', function (req, res) {
   res.status(404).json({ message: 'API route not found.' });
 });
 
 app.use(function (err, req, res, next) {
+  if (err && err.code === 11000) {
+    return res.status(409).json({ message: 'This email is already registered for this event.' });
+  }
+  console.error('Request failed:', err && err.message);
   const status = err.status || err.statusCode || 500;
   const message = status === 400
     ? 'Invalid request data.'
